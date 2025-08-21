@@ -1,0 +1,77 @@
+// controllers/bidController.js
+const db = require('../models');
+const Bid = db.Bid;
+const Auction = db.Auction;
+
+exports.placeBid = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Missing or invalid token' });
+
+    // If you use /api/bids/:id
+    const auctionId = Number(req.params.id);
+    // If you use /api/bids with body, switch to: const { auctionId } = req.body;
+    const amount = Number(req.body.amount);
+    const userId = req.user.id;
+
+    if (!Number.isFinite(auctionId)) return res.status(400).json({ error: 'Invalid auction id' });
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Invalid bid amount' });
+
+    const auction = await Auction.findByPk(auctionId);
+    if (!auction) return res.status(404).json({ error: 'Auction not found.' });
+
+    // Optional: block bidding after auction end
+    if (auction.endTime && new Date(auction.endTime) <= new Date()) {
+      return res.status(400).json({ error: 'Auction has ended.' });
+    }
+
+    // Enforce > starting price AND > current highest bid
+    const highest = await Bid.max('amount', { where: { auctionId } });
+    const minRequired = Math.max(Number(auction.startingPrice) || 0, Number(highest) || 0) + 0; // add increment if you want
+    if (amount <= minRequired) {
+      return res.status(400).json({ error: `Bid must be greater than ${minRequired}.` });
+    }
+
+    const bid = await Bid.create({ amount, userId, auctionId });
+    return res.status(201).json(bid);
+  } catch (error) {
+    console.error('placeBid error:', error);
+    return res.status(500).json({ error: 'Failed to place bid.' });
+  }
+};
+
+// (nice-to-have) order newest first
+exports.getBidsForAuction = async (req, res) => {
+  const { auctionId } = req.params;
+  try {
+    const bids = await db.Bid.findAll({
+      where: { auctionId },
+      order: [['createdAt', 'DESC']]
+    });
+    res.json(bids);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+// controllers/bidController.js
+exports.getBidsByUser = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Missing or invalid token' });
+
+    const requestedUserId = Number(req.params.userId);
+    const isAdmin = req.user.role === 'admin';
+    const isSelf = req.user.id === requestedUserId;
+
+    if (!isAdmin && !isSelf) {
+      return res.status(403).json({ error: 'Forbidden: You can only view your own bids.' });
+    }
+
+    const bids = await db.Bid.findAll({
+      where: { userId: requestedUserId },
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.json(bids);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

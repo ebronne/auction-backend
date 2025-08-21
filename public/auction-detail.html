@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Auction Details</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+  <!-- Header -->
+  <header class="bg-white shadow p-4 flex justify-between items-center">
+    <h1 class="text-2xl font-bold">Imperial Auction</h1>
+    <nav>
+      <a href="/auctions.html" class="text-blue-600 hover:underline mr-4">Auctions</a>
+      <a href="/my-bids.html" class="text-blue-600 hover:underline">My Bids</a>
+    </nav>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-5xl mx-auto p-6 bg-white mt-6 rounded shadow">
+    
+    <!-- Auction Info -->
+    <div id="auctionInfo" class="mb-8">
+      <h2 class="text-xl font-semibold mb-2">Loading auction...</h2>
+    </div>
+
+    <!-- Countdown -->
+    <div class="text-red-600 font-semibold mb-6">
+      Time Remaining: <span id="countdown">--</span>
+    </div>
+
+    <!-- Bid History -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-2">Bid History</h2>
+      <ul id="bidHistory" class="bg-gray-50 p-4 rounded border space-y-2">
+        <li>Loading bids...</li>
+      </ul>
+    </section>
+
+    <!-- Bid Form -->
+    <section>
+      <h2 class="text-xl font-semibold mb-2">Place Your Bid</h2>
+      <form id="bidForm" class="space-y-4">
+        <input type="number" step="0.01" id="bidAmount" class="w-full border p-2 rounded" placeholder="Enter your bid" required />
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+          Submit Bid
+        </button>
+        <p id="bidMessage" class="mt-2 text-sm"></p>
+      </form>
+    </section>
+  </main>
+
+  <!-- Script -->
+  <script>
+    const auctionId = new URLSearchParams(window.location.search).get("id");
+    const token = localStorage.getItem("token");
+
+    const auctionInfoEl = document.getElementById("auctionInfo");
+    const countdownEl = document.getElementById("countdown");
+    const bidForm = document.getElementById("bidForm");
+    const bidAmountEl = document.getElementById("bidAmount");
+    const bidMessage = document.getElementById("bidMessage");
+    const bidHistoryEl = document.getElementById("bidHistory");
+
+    async function fetchAuctionDetails() {
+      try {
+        const res = await fetch(`/api/auctions/${auctionId}`);
+        if (!res.ok) throw new Error("Auction not found");
+        const data = await res.json();
+
+        auctionInfoEl.innerHTML = `
+          <h2 class="text-2xl font-bold mb-2">${data.title}</h2>
+          <img src="${data.imageUrl || '/placeholder.png'}" alt="${data.title}" class="max-w-md rounded mb-4"/>
+          <p class="mb-2">${data.description}</p>
+          <p class="font-semibold">Starting Price: GHS ${data.startingPrice.toFixed(2)}</p>
+          <p class="text-green-600 font-bold">Current Highest Bid: GHS ${data.highestBid?.amount?.toFixed(2) || data.startingPrice}</p>
+        `;
+
+        startCountdown(new Date(data.endTime));
+      } catch (err) {
+        auctionInfoEl.innerHTML = `<p class="text-red-600">Failed to load auction. ${err.message}</p>`;
+      }
+    }
+
+    async function fetchBidHistory() {
+      try {
+        const res = await fetch(`/api/auctions/${auctionId}/bids`);
+        const bids = await res.json();
+
+        bidHistoryEl.innerHTML = bids.length
+          ? bids.map(bid => `<li>GHS ${bid.amount.toFixed(2)} by ${bid.user?.name || "User"}</li>`).join("")
+          : "<li>No bids yet.</li>";
+      } catch (err) {
+        bidHistoryEl.innerHTML = `<li class="text-red-600">Error loading bid history</li>`;
+      }
+    }
+
+    bidForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const bidAmount = parseFloat(bidAmountEl.value);
+
+      if (!token) {
+        bidMessage.textContent = "Please log in to place a bid.";
+        bidMessage.className = "text-red-500";
+        return;
+      }
+
+      const res = await fetch(`/api/auctions/${auctionId}/bids`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ amount: bidAmount })
+      });
+
+      const result = await res.json();
+
+      if (res.ok) {
+        bidMessage.textContent = "Bid placed successfully!";
+        bidMessage.className = "text-green-600";
+        bidAmountEl.value = "";
+        fetchBidHistory();
+      } else {
+        bidMessage.textContent = result.message || "Failed to place bid.";
+        bidMessage.className = "text-red-500";
+      }
+    });
+
+    function startCountdown(endTime) {
+      const interval = setInterval(() => {
+        const now = new Date();
+        const diff = endTime - now;
+
+        if (diff <= 0) {
+          countdownEl.textContent = "Auction ended";
+          clearInterval(interval);
+          bidForm.querySelector("button").disabled = true;
+          return;
+        }
+
+        const seconds = Math.floor((diff / 1000) % 60);
+        const minutes = Math.floor((diff / 1000 / 60) % 60);
+        const hours = Math.floor((diff / 1000 / 60 / 60) % 24);
+        const days = Math.floor(diff / 1000 / 60 / 60 / 24);
+
+        countdownEl.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+      }, 1000);
+    }
+
+    // Initialize
+    if (auctionId) {
+      fetchAuctionDetails();
+      fetchBidHistory();
+    } else {
+      auctionInfoEl.innerHTML = "<p class='text-red-600'>Missing auction ID in URL.</p>";
+    }
+  </script>
+
+</body>
+</html>
